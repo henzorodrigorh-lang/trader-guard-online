@@ -6,25 +6,24 @@ import numpy as np
 from datetime import datetime
 import requests
 import hashlib
-import pyttsx3
-import threading
+import os # Importante para ler as variáveis do Railway
 import time
 import streamlit.components.v1 as components
 
 # ================= CONFIGURAÇÃO DA PÁGINA =================
 st.set_page_config(page_title="Trader Guard PRO", layout="wide")
 
-# ================= API & TELEGRAM =================
-api_key = "BINANCE_SECRET_KEY"
-api_secret = "BINANCE_API_KEY"
+# ================= API & TELEGRAM (LENDO DO RAILWAY) =================
+# Agora o robô busca as chaves que você configurou no painel "Variables" do Railway
+api_key = os.getenv("BINANCE_API_KEY")
+api_secret = os.getenv("BINANCE_SECRET_KEY")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 try:
     client = Client(api_key, api_secret)
 except:
     client = None
-
-TOKEN = "TELEGRAM_TOKEN"
-CHAT_ID = "TELEGRAM_CHAT_ID"
 
 def enviar_telegram(mensagem):
     if not TOKEN or not CHAT_ID: return
@@ -34,16 +33,6 @@ def enviar_telegram(mensagem):
     except:
         pass
 
-def falar(texto):
-    def run_speech():
-        try:
-            engine = pyttsx3.init()
-            engine.say(texto)
-            engine.runAndWait()
-        except:
-            pass
-    threading.Thread(target=run_speech, daemon=True).start()
-
 # ================= ESTADO DA SESSÃO & LOGIN =================
 def hash_senha(senha):
     return hashlib.sha256(senha.encode()).hexdigest()
@@ -52,15 +41,8 @@ if 'usuarios_db' not in st.session_state:
     st.session_state['usuarios_db'] = {"admin": hash_senha("admin")} 
 if 'logado' not in st.session_state:
     st.session_state['logado'] = False
-if 'usuario' not in st.session_state:
-    st.session_state['usuario'] = ""
 if 'sinais_enviados' not in st.session_state:
     st.session_state['sinais_enviados'] = [] 
-
-def cadastrar_usuario(usuario, senha):
-    if usuario in st.session_state['usuarios_db']: return False
-    st.session_state['usuarios_db'][usuario] = hash_senha(senha)
-    return True
 
 def autenticar(usuario, senha):
     return st.session_state['usuarios_db'].get(usuario) == hash_senha(senha)
@@ -95,7 +77,6 @@ def check_tendencia_4h(symbol):
         return "ALTA" if preco_4h > ma_4h else "BAIXA"
     return "INDEFINIDA"
 
-# ================= LÓGICA DE SINAL ANTECIPADO =================
 def checklist(df, symbol):
     df["EMA200"] = ema(df["close"])
     df["ATR"] = atr(df)
@@ -106,13 +87,11 @@ def checklist(df, symbol):
 
     if df["ATR"].iloc[-1] < df["ATR"].mean() * 0.5: return None
 
-    # Pullback Antecipado na EMA200
     if ultimo["close"] > ultimo["EMA200"] and ultimo["low"] <= ultimo["EMA200"]:
         return {"par": symbol, "direcao": "COMPRA", "prob": 96, "risco": "MUITO BAIXO", "msg": "Pullback na EMA200"}
     if ultimo["close"] < ultimo["EMA200"] and ultimo["high"] >= ultimo["EMA200"]:
         return {"par": symbol, "direcao": "VENDA", "prob": 96, "risco": "MUITO BAIXO", "msg": "Pullback na EMA200"}
 
-    # Armadilhas Antecipadas
     if ultimo["low"] < fundo and ultimo["close"] > fundo:
         return {"par": symbol, "direcao": "COMPRA", "prob": 95, "risco": "BAIXO", "msg": "Armadilha de Fundo"}
     if ultimo["high"] > topo and ultimo["close"] < topo:
@@ -124,86 +103,45 @@ def checklist(df, symbol):
 st.title("📊 Trader Guard - Sinais Antecipados")
 
 if not st.session_state['logado']:
-    menu = st.sidebar.selectbox("Menu de Acesso", ["Fazer Login", "Criar Conta"])
-    
+    menu = st.sidebar.selectbox("Menu", ["Fazer Login"])
     if menu == "Fazer Login":
-        st.sidebar.subheader("🔐 Login")
         with st.sidebar.form(key="login_f"):
             u_input = st.text_input("Usuário")
             p_input = st.text_input("Senha", type="password")
             if st.form_submit_button("Entrar"):
                 if autenticar(u_input, p_input):
                     st.session_state['logado'] = True
-                    st.session_state['usuario'] = u_input
                     st.rerun()
-                else:
-                    st.sidebar.error("Usuário ou senha incorretos.")
-                    
-    elif menu == "Criar Conta":
-        st.sidebar.subheader("📝 Cadastro")
-        with st.sidebar.form(key="signup_f"):
-            n_user = st.text_input("Novo Usuário")
-            n_pass = st.text_input("Nova Senha", type="password")
-            if st.form_submit_button("Cadastrar"):
-                if n_user and n_pass:
-                    if cadastrar_usuario(n_user, n_pass):
-                        st.sidebar.success("✅ Cadastrado! Mude para Login.")
-                    else:
-                        st.sidebar.error("❌ Usuário já existe.")
 else:
-    st.sidebar.success(f"👤 Logado: {st.session_state['usuario']}")
-    if st.sidebar.button("Sair"):
-        st.session_state['logado'] = False
-        st.rerun()
-
-    # Painel de Controle
     col_monitor, col_grafico = st.columns([1, 3])
-    
     with col_monitor:
-        st.header("🚦 Radar")
         robo_ligado = st.toggle("🤖 Ligar Robô")
         placeholder_alertas = st.container()
 
     with col_grafico:
-        par_v = st.selectbox("Par Principal", ["BTCUSDT", "ETHUSDT", "SOLUSDT","XRPUSDT", "ADAUSDT", "DOGEUSDT"])
+        par_v = st.selectbox("Par Principal", ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
         tv_html = f'<div id="tv-chart" style="height:600px;"></div><script src="https://s3.tradingview.com/tv.js"></script><script>new TradingView.widget({{"autosize": true, "symbol": "BINANCE:{par_v}", "interval": "15", "theme": "dark", "container_id": "tv-chart"}});</script>'
         components.html(tv_html, height=620)
 
-    # LOOP DE EXECUÇÃO
     if robo_ligado:
-        pares = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT"]
-        intervalos = ["15m", "1h"]
-
+        pares = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+        intervalos = ["15m"]
         for par in pares:
             tendencia_mestra = check_tendencia_4h(par)
-            
             for tempo in intervalos:
                 df = get_candles(par, tempo)
                 if df is not None:
                     sinal = checklist(df, par)
-
                     if sinal:
-                        if sinal["direcao"] == "COMPRA" and tendencia_mestra == "BAIXA": sinal = None
-                        elif sinal["direcao"] == "VENDA" and tendencia_mestra == "ALTA": sinal = None
-
-                        if sinal:
-                            # ID para evitar repetição no mesmo candle de 15 min
-                            id_sinal = f"{par}_{tempo}_{sinal['direcao']}_{datetime.now().hour}_{datetime.now().minute // 15}"
-                            
-                            if id_sinal not in st.session_state['sinais_enviados']:
-                                st.session_state['sinais_enviados'].append(id_sinal)
-                                
-                                emoji = "🟢 COMPRA" if sinal['direcao'] == "COMPRA" else "🔴 VENDA"
-                                msg = (f"🚀 *{emoji} VALIDADO*\n"
-                                       f"🪙 {par} ({tempo})\n"
-                                       f"🎯 Prob: {sinal['prob']}%\n"
-                                       f"📝 {sinal['msg']}\n"
-                                       f"⏰ *ENTRE AGORA* - Sinal Antecipado")
-                                
-                                enviar_telegram(msg)
-                                falar(f"Sinal de {sinal['direcao']} em {par}")
-                                with placeholder_alertas:
-                                    st.markdown(f"**{par}**: {emoji}")
-
-        time.sleep(15) # Mais rápido para pegar o "toque" em tempo real
+                        if (sinal["direcao"] == "COMPRA" and tendencia_mestra == "BAIXA") or (sinal["direcao"] == "VENDA" and tendencia_mestra == "ALTA"):
+                            continue
+                        
+                        id_sinal = f"{par}_{tempo}_{sinal['direcao']}_{datetime.now().minute // 15}"
+                        if id_sinal not in st.session_state['sinais_enviados']:
+                            st.session_state['sinais_enviados'].append(id_sinal)
+                            emoji = "🟢" if sinal['direcao'] == "COMPRA" else "🔴"
+                            enviar_telegram(f"🚀 *{emoji} {sinal['direcao']}* | {par}")
+                            with placeholder_alertas:
+                                st.markdown(f"**{par}**: {emoji}")
+        time.sleep(15)
         st.rerun()
