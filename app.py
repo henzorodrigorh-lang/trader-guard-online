@@ -1,43 +1,30 @@
 import streamlit as st
-from binance.client import Client
-import pandas as pd
-import numpy as np
 import os
-import time
+import sys
+import pandas as pd
+from binance.client import Client
 import requests
-import hashlib
-import streamlit.components.v1 as components
-from datetime import datetime
 
+# 1. Configuração de Porta para o Railway (ESSENCIAL)
+port = int(os.getenv("PORT", 8080))
+
+# 2. Se for a execução principal, rodar o Streamlit
+if __name__ == "__main__":
+    if "IS_RUNNING" not in os.environ:
+        os.environ["IS_RUNNING"] = "true"
+        import streamlit.web.cli as stcli
+        sys.argv = ["streamlit", "run", "app.py", "--server.port", str(port), "--server.address", "0.0.0.0"]
+        sys.exit(stcli.main())
+
+# 3. Restante do seu código (Apenas após o Streamlit ter iniciado)
 st.set_page_config(page_title="Trader Guard PRO", layout="wide")
 
-# Configuração das variáveis de ambiente
 api_key = os.getenv("BINANCE_API_KEY")
 api_secret = os.getenv("BINANCE_SECRET_KEY")
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
 client = Client(api_key, api_secret) if api_key and api_secret else None
 
-def enviar_telegram(mensagem):
-    if not TOKEN or not CHAT_ID: return
-    try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
-                      data={"chat_id": CHAT_ID, "text": mensagem, "parse_mode": "Markdown"}, timeout=5)
-    except: pass
-
-def ema(series, period=200): return series.ewm(span=period, adjust=False).mean()
-
-def get_candles(symbol, interval):
-    if not client: return None
-    try:
-        klines = client.get_klines(symbol=symbol, interval=interval, limit=200)
-        df = pd.DataFrame(klines, columns=["time", "open", "high", "low", "close", "v", "ct", "qav", "t", "tb", "tq", "i"])
-        return df[["high", "low", "close"]].astype(float)
-    except: return None
-
-# Interface e Lógica
 st.title("📊 Trader Guard - Online")
+
 if 'logado' not in st.session_state: st.session_state['logado'] = False
 
 if not st.session_state['logado']:
@@ -46,10 +33,6 @@ else:
     robo_ligado = st.sidebar.toggle("Ligar Robô")
     if robo_ligado:
         st.success("Robô Ativo")
-        par = "BTCUSDT"
-        df = get_candles(par, "15m")
-        if df is not None:
-            st.write(f"Monitorando {par}...")
-            # Lógica simples de monitoramento aqui
+        st.write("Monitorando mercado...")
     else:
         st.warning("Robô Desligado")
