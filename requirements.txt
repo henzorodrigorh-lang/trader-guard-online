@@ -3,4 +3,3 @@ python-binance
 pandas
 numpy
 requests
-pyttsx3
